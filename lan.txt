@@ -1,0 +1,151 @@
+import os
+import pygame
+from gtts import gTTS
+import time
+import pyrebase
+import speech_recognition as sr
+import RPi.GPIO as GPIO
+
+import board
+
+
+
+
+
+# Thiết lập GPIO cho đèn LED
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+LED_PIN = 18
+GPIO.setup(LED_PIN, GPIO.OUT)
+FAN_PIN = 25
+GPIO.setup(FAN_PIN, GPIO.OUT)
+# Cấu hình Firebase
+config = {
+     "apiKey": "AIzaSyBfseyRQGTKU9BMxlK4Fk4vmLsxUa6WLGk",
+     "authDomain": "dht-test-f24e1.firebaseapp.com",
+     "databaseURL": "https://dht-test-f24e1-default-rtdb.firebaseio.com",
+     "storageBucket": "dht-test-f24e1.appspot.com"
+}
+
+# Khởi tạo Firebase
+firebase = pyrebase.initialize_app(config)
+db = firebase.database()
+#translator = Translator()
+language = 'vi'
+# Thiết lập cảm biến DHT11
+
+def speak(text):
+    print("Máy: {}".format(text))
+    tts = gTTS(text=text, lang=language, slow=False)
+    filename = "sound_" + str(int(time.time())) + ".mp3"  # Tạo tên file duy nhất
+    tts.save(filename)
+    
+    pygame.mixer.init()
+    pygame.mixer.music.load(filename)
+    pygame.mixer.music.play()
+    
+    while pygame.mixer.music.get_busy():
+        pygame.time.Clock().tick(10)
+    
+    pygame.mixer.quit()
+    os.remove(filename)
+
+def stop():
+    speak("Hẹn gặp lại bạn sau.")
+
+def get_audio():
+    r = sr.Recognizer()
+    
+    with sr.Microphone() as source:
+        print("Tôi: ", end='')
+        audio = r.listen(source, phrase_time_limit=5)
+        
+        try:
+            text = r.recognize_google(audio, language="vi-VN")
+            print(text)
+            return text.strip().lower()
+        except sr.UnknownValueError:
+            print("Không nhận được âm thanh.")
+        except sr.RequestError:
+            print("Không thể kết nối với Google Speech Recognition.")
+        
+        return ""
+
+def get_text():
+    print("Bạn: ", end='')
+    text = input().lower()
+    return text.strip().lower()
+
+def update_devices():
+    # Đọc dữ liệu từ Firebase
+    myData = db.get().val()  # Đọc toàn bộ dữ liệu từ nút gốc
+    if myData is None:
+        print("Không có dữ liệu từ Firebase.")
+        return  # Dừng hàm nếu không có dữ liệu
+
+
+    
+    led_status = int(myData.get("led", "0"))  # Chuyển đổi thành số nguyên
+    fan_status = int(myData.get("fan", "0"))  # Chuyển đổi thành số nguyên
+        
+        # Điều khiển đèn LED
+    if led_status == 1:
+       GPIO.output(LED_PIN, GPIO.LOW)
+    else:
+        GPIO.output(LED_PIN, GPIO.HIGH)
+        
+        # Điều khiển quạt
+    if fan_status == 1:
+       GPIO.output(FAN_PIN, GPIO.LOW)
+    else:
+       GPIO.output(FAN_PIN, GPIO.HIGH)
+ ###################################      
+
+def assistant():
+    while True:
+        update_devices()  # Cập nhật trạng thái thiết bị từ Firebase
+    
+        
+        time.sleep(1)  # Delay for 60 seconds before reading again
+
+        print("Bạn cần giúp gì?")
+        text = get_audio()  # Lấy âm thanh từ microphone và nhận dạng văn bản
+        
+        if "nhập câu hỏi bằng tay" in text:
+            text = input("Bạn: ").strip().lower()
+        
+        if "bật đèn" in text:
+            GPIO.output(LED_PIN, GPIO.HIGH)
+            speak("Đèn đã bật.")
+            db.update({"led": 1}) 
+    # Cập nhật Firebase        db.child("Control Me").update({"led": 1})  # Cập nhật Firebase
+        elif "tắt đèn" in text:
+            GPIO.output(LED_PIN, GPIO.LOW)
+            speak("Đèn đã tắt.")
+            db.update({"led": 0}) 
+        # Cập nhật Firebase    db.child("Control Me").update({"led": 0})  # Cập nhật Firebase
+        elif "bật quạt" in text:
+            GPIO.output(FAN_PIN, GPIO.HIGH)
+            speak("Quạt đã bật.")
+            db.update({"fan": 1}) 
+      # Cập nhật Firebase      db.child("Control Me").update({"bom": 1})  # Cập nhật Firebase
+        elif "tắt quạt" in text:
+            GPIO.output(FAN_PIN, GPIO.LOW)
+            speak("Quạt đã tắt.")
+            db.update({"fan": 0}) 
+        # Cập nhật Firebase    db.child("Control Me").update({"bom": 0})  # Cập nhật Firebase
+        elif "xin chào" in text:
+            speak("chào mừng bạn đến với nhà thông ming ICTU")
+        elif "trợ lý ơi" in text:
+            continue  # Quay lại vòng lặp while để tiếp tục nghe lệnh từ người dùng
+        elif "tạm biệt" in text or "dừng lại" in text:
+            speak("Hẹn gặp lại bạn sau")
+            stop()
+            break
+
+# Khởi tạo cơ sở dữ liệu nếu chưa có
+
+
+while True:
+    assistant()
+
